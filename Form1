@@ -1,0 +1,364 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Data.OleDb;
+using System.IO;
+using System.Drawing;
+using System.Linq;
+using System.Text;
+using System.Windows.Forms;
+
+namespace Visualization
+{
+    public partial class Form1 : Form
+    {
+        public static int kSpl = 3; //порядок сплайна 
+        public static int irow = 500; // максимальное число строк
+        public static int icol = 100; //максимальное число столбцов       
+        public static int Resolution = 10; //количество точек сплайна на интервале
+        private string Excel03ConString = "Provider=Microsoft.Jet.OLEDB.4.0;Data Source={0};Extended Properties='Excel 8.0;HDR={1}'";
+        private string Excel07ConString = "Provider=Microsoft.ACE.OLEDB.12.0;Data Source={0};Extended Properties='Excel 12.0 Xml;HDR={1}'";
+        public static int rIndex1 = 1; //индекс выбранной стр в dataGridView1
+        public static int rIndex2 = 1; //индекс выбранной стр в dataGridView2
+        DataTable table = new DataTable();
+        DataTable table1 = new DataTable();
+        public static bool endSelect = true;
+        public static int nColumns; //число столбцов
+        public static int nRows; // число строк
+        public static string[] listHeader = new string[icol]; //массив для заголовков столбцов
+        public static string[] listHeaderRows = new string[irow]; //массив для заголовков строк
+        public static double[] result = new double[icol]; //массив для 
+        public static double[] minStr = new double[icol]; //массив для строки с минимальными элементами
+        public static double[] maxStr = new double[icol]; //массив для строки с максимальными элементами
+        public static double[] maxminStr = new double[icol]; //массив для разности макисальный - минимальный
+        public static int[] indcationStr = new int[icol]; //массив для индикаторной строки
+        public static double[,] array = new double[irow, icol]; //массив для числовых значений
+        string[,] array1 = new string[irow, icol]; // массив для строковых значений
+        public static int[,] index12 = new int[2, icol];
+        public static int[,] rindex12 = new int[2, icol];
+        public static int indexRowInView1 = -1;
+        public static int indexRowInView2 = -1;
+        public static int indexRowsInView2 = 0;
+        public static double[ , ] arayResult = new double[irow, icol];
+
+        public Form1()
+        {
+            InitializeComponent();  
+            for (int i = 0; i < icol; i++)
+            {
+                index12[0,i] = -1;
+                index12[1, i] = -1;
+                rindex12[0, i] = -1;
+                rindex12[1, i] = -1;
+            }
+        }
+       
+        private void открытьToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            openFileDialog1.ShowDialog();
+        }
+      
+        private void openFileDialog1_FileOk_1(object sender, CancelEventArgs e)
+        {
+            string filePath = openFileDialog1.FileName;
+            string extension = Path.GetExtension(filePath);
+            string header = "YES";
+            string conStr, sheetName;
+            conStr = string.Empty;
+            switch (extension)
+            {
+                case ".xls": //Excel 97-03
+                    conStr = string.Format(Excel03ConString, filePath, header);
+                    break;
+
+                case ".xlsx": //Excel 07
+                    conStr = string.Format(Excel07ConString, filePath, header);
+                    break;
+            }
+
+            //Получение имени первого листа
+            using (OleDbConnection con = new OleDbConnection(conStr))
+            {
+                using (OleDbCommand cmd = new OleDbCommand())
+                {
+                    cmd.Connection = con;
+                    con.Open();
+                    DataTable dtExcelSchema = con.GetOleDbSchemaTable(OleDbSchemaGuid.Tables, null);
+
+                    sheetName = dtExcelSchema.Rows[0]["TABLE_NAME"].ToString();
+                    con.Close();
+                }
+            }
+
+            //Считывание данных с первого листа файла
+            using (OleDbConnection con = new OleDbConnection(conStr))
+            {
+                using (OleDbCommand cmd = new OleDbCommand())
+                {
+                    using (OleDbDataAdapter oda = new OleDbDataAdapter())
+                    {
+                        string strSQL = "SELECT * From [" + sheetName + "]";
+                        cmd.CommandText = strSQL;
+                        cmd.Connection = con;
+                        con.Open();
+                        oda.SelectCommand = cmd;
+                        oda.Fill(table);
+                        dataGridView1.DataSource = table;
+                        Form1.nColumns = table.Columns.Count;
+                        Form1.nRows = table.Rows.Count;
+                        List<string> listBox1 = new List<string>();                                     
+                        string expression;
+                        expression = "0 >= 0";
+                        DataRow[] foundRows;
+
+                        // Заполняем массив заголовков
+                        for (int i = 0; i < table.Columns.Count; i++)
+                        {
+                            listBox1.Add(dataGridView1.Columns[i].HeaderText);
+                            listHeader[i] = listBox1[i];
+                        }
+                        // заносим данные из таблицы в массив array1[i, j] в символьном виде  
+                        foundRows = table.Select(expression);
+                       
+                        for (int i = 0; i < foundRows.Length; i++)
+                        {
+                            for (int j = 0; j < table.Columns.Count; j++)
+                            {
+                                array1[i, j] = foundRows[i][j].ToString();
+
+                            }
+                        }                      
+                        //пеписываем в массив  array[i, j] только данные из array1[i, j]
+                        for (int i = 1; i < foundRows.Length; i++)
+                        {
+                            for (int j = 1; j < table.Columns.Count; j++)
+                            {
+                                array[i - 1, j - 1] = Double.Parse(array1[i, j]);
+                            }
+                        }
+
+                        //записывает строку индикаторов, показывающую максимум (1) или минимум (0) мы ищем по столбцу 
+                        for (int j = 1; j < table.Columns.Count; j++)
+                        {
+                            indcationStr[j - 1] = int.Parse(array1[0, j]);
+                        }
+
+                        //записываем в listHeaderRows столбец заголовков
+                        for (int i = 0; i < foundRows.Length; i++)
+                        {
+                            listHeaderRows[i] = array1[i, 0];
+                        }
+
+                        // находим и записываем в массив minStr[k] минимальные элементы по столбцам
+                        for (int k = 0; k <= table.Columns.Count - 2; k++)
+                        {
+                            minStr[k] = array[0, k];
+                        }
+                        for (int k = 0; k <= table.Columns.Count - 2; k++)
+                        {
+                            for (int m = 1; m <= table.Rows.Count - 2; m++)
+                            {
+                                if (minStr[k] > array[m, k])
+                                {
+                                    minStr[k] = array[m, k];
+                                }
+                            }
+                        }
+                        // находим и записываем в массив maxStr[k] максимальные элементы по столбцам
+                        for (int k = 0; k <= table.Columns.Count - 2; k++)
+                        {
+                            maxStr[k] = array[0, k];
+                        }
+                        for (int k = 0; k <= table.Columns.Count - 2; k++)
+                        {
+                            for (int m = 1; m <= table.Rows.Count - 2; m++)
+                            {
+                                if (maxStr[k] < array[m, k])
+                                {
+                                    maxStr[k] = array[m, k];
+                                }
+                            }
+                        }
+
+                        for (int k = 0; k <= table.Columns.Count - 2; k++)
+                        {
+                            if (maxStr[k] - minStr[k] > 0)
+                                maxminStr[k] = maxStr[k] - minStr[k];
+                            else
+                            {
+                                maxminStr[k] = 1;
+                            }
+                        }                            
+                    }
+                } 
+            }
+        }
+
+        private void button1_Click(object sender, EventArgs e)
+        {
+            endSelect = false;
+            int  iIndex;
+            Form1.indexRowsInView2 = dataGridView2.RowCount -1;
+            for (int i = 0; i <= indexRowsInView2-1; i++)
+            {
+               iIndex = index12[0,i];
+               for (int k = 0; k <= Form1.nColumns - 2; k++)
+            {
+                Form1.result[k] = Form1.array[iIndex-1, k];
+            }
+                          
+            //масштабируем выбранную строку в интервал [0,1]
+            for (int k = 0; k <= Form1.nColumns - 2; k++)
+            {
+                Form1.result[k] = Form1.result[k] - Form1.minStr[k];
+            }
+            for (int k = 0; k <= Form1.nColumns - 2; k++)
+            {
+                Form1.result[k] = Form1.result[k] / Form1.maxminStr[k];
+            }
+            for (int k = 0; k <= Form1.nColumns - 2; k++)
+            {
+                if (Form1.indcationStr[k] == 0)
+                {
+                    Form1.result[k] = 1 - Form1.result[k];
+                }
+                else
+                {
+                    Form1.result[k] = Form1.result[k];                  
+                }
+            } 
+              for (int k = 0; k <= Form1.nColumns - 2; k++)
+              {
+                  arayResult[i, k] = result[k];
+              }
+            }
+            return;
+        }
+      
+        private void nМернуюТочкуToolStripMenuItem_Click(object sender, EventArgs e)
+        {           
+           Form2 newChild = new Form2();
+           newChild.ShowDialog();
+           Close();          
+           return;
+        }
+
+        private void каскадToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            this.LayoutMdi(System.Windows.Forms.MdiLayout.Cascade);
+        }
+
+        private void вертикальноToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            this.LayoutMdi(System.Windows.Forms.MdiLayout.TileVertical);
+        }
+
+        private void горизонтальноToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            this.LayoutMdi(System.Windows.Forms.MdiLayout.TileHorizontal);
+        }
+
+        private void управляющийПолигонToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+        }
+
+        private void button2_Click(object sender, EventArgs e)
+        {
+            indexRowInView2 = indexRowInView2 + 1;
+            List<string> listBox1 = new List<string>();
+            for (int i = 0; i < table.Columns.Count; i++)
+            {
+                listBox1.Add(dataGridView1.Columns[i].HeaderText);
+                listHeader[i] = listBox1[i];
+            }
+            for (int i = 0; i < table.Columns.Count; i++)
+            {
+                DataGridViewTextBoxColumn firstColumn = new DataGridViewTextBoxColumn();
+                firstColumn.HeaderText = listHeader[i].ToString();
+                firstColumn.Name = listHeader[i].ToString();
+                dataGridView2.Columns.Add(firstColumn);
+            }
+
+            if (Form1.rIndex1  > -1)
+            {        
+                dataGridView1.Rows[Form1.rIndex1].Selected = true;
+                DataGridViewRow row = new DataGridViewRow();
+
+                for (int i = 0; i < table.Columns.Count; i++)
+                {
+                    DataGridViewCell firstCell = new DataGridViewTextBoxCell();
+                    firstCell.Value = dataGridView1[i,Form1.rIndex1].Value.ToString();                  
+                    row.Cells.AddRange(firstCell);
+                }
+                this.dataGridView2.Rows.Add(row);
+                index12[0, indexRowInView2] = rIndex1;
+                index12[1, indexRowInView2] = indexRowInView2;
+                return;
+            }
+            else
+            {
+                MessageBox.Show("Выберите строку");
+                Return;// no  row is selected or last empty row is selected
+            }
+        }
+
+        private void button3_Click(object sender, EventArgs e)
+        {
+            if (this.dataGridView2.SelectedRows.Count > 0)
+            {
+                foreach (DataGridViewRow dgvrCurrent in dataGridView2.SelectedRows)
+                {
+                    if (dgvrCurrent == dataGridView2.CurrentRow)
+                    {
+                        dataGridView1.CurrentCell = null;
+                    }
+                    // Удалить строку
+                    this.dataGridView2.Rows.RemoveAt(Form1.rIndex2);
+                    index12[1, rIndex2] = -1;
+                    int ii = -1;
+                    for (int j = 0; j < icol; j++)
+                    {
+                        if (index12[1, j] == -1)
+                        {                     
+                            continue;
+                        }
+                        ii = ii + 1;
+                        indexRowsInView2 = ii;
+                        rindex12[0, ii] = index12[0, j];
+                        rindex12[1, ii] = ii;
+                        index12[0, j] = -1;
+                        index12[1, j] = -1;
+                    }
+                        for (int j = 0; j < icol; j++)
+                        {
+                            index12[0, j] = rindex12[0, j];
+                            index12[1, j] = rindex12[1, j];
+                        }
+                }
+            }
+        }
+
+        private void dataGridView2_CellMouseClick(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (endSelect)
+            {
+                //получение индекса выделенной строки в dataGridView2
+                Form1.rIndex2 = e.RowIndex;
+                return;
+            }
+            return;
+        }
+
+        private void dataGridView1_CellMouseClick(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (endSelect)
+            {   //получение индекса выделенной строки в dataGridView1
+                Form1.rIndex1 = e.RowIndex;
+                return;
+            }
+            return;
+        }      
+    }
+}
