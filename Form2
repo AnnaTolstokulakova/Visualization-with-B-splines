@@ -1,0 +1,358 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
+using System.Text;
+using System.Windows.Forms;
+using ZedGraph;
+
+namespace Visualization
+{
+    public partial class Form2 : Form
+    {
+        bool nControl = false;
+        //  список точек для кривой f1(x)
+        PointPairList f1_list = new PointPairList();
+        // список точек для кривой f2(x)
+        PointPairList f2_list = new PointPairList();
+        List<double> PX = new List<double> { 0 };
+        List<double> PY = new List<double> { 0 };                           
+        List<int> Knots = new List<int> { 0 }; //узлы сплайна
+ 
+        // Массив цветов, из которых будем выбирать цвет для графика
+        Color[] colors = new Color[] 
+            {           
+            Color.Blue,         
+            Color.Green,
+            Color.Indigo,
+            Color.Orange,
+            Color.Brown,     
+            Color.Red,
+            Color.Yellow,
+            Color.Gray,
+            Color.Black
+            };
+
+        public Form2()
+        {            
+            InitializeComponent();
+            Knots.Remove(0);
+            PX.Remove(0);
+            PY.Remove(0);
+
+            zedGraph.CursorChanged += new EventHandler(zedGraph_CursorChanged);
+            // Подпишемся на событие, которое срабатывает при изменении курсора
+            // Подпишемся на событие, которое будет возникать перед тем, как будет показано контекстное меню.
+            zedGraph.ContextMenuBuilder +=
+                new ZedGraphControl.ContextMenuBuilderEventHandler(zedGraph_ContextMenuBuilder);
+            // Включим показ всплывающих подсказок при наведении курсора на график
+            zedGraph.IsShowPointValues = true;
+
+            // Будем обрабатывать событие PointValueEvent, чтобы изменить формат представления координат
+            zedGraph.PointValueEvent +=
+                new ZedGraphControl.PointValueHandler(zedGraph_PointValueEvent);         
+             DrawGraph();
+        }
+        /// Обработчик события, который вызывается, перед показом контекстного меню
+        /// </summary>
+        /// <param name="sender">Компонент ZedGraph</param>
+        /// <param name="menuStrip">Контекстное меню, которое будет показано</param>
+        /// <param name="mousePt">Координаты курсора мыши</param>
+        /// <param name="objState">Состояние контекстного меню. Описывает объект, на который кликнули.</param>
+        void zedGraph_ContextMenuBuilder(ZedGraphControl sender,
+            ContextMenuStrip menuStrip,
+            Point mousePt,
+            ZedGraphControl.ContextMenuObjectState objState)
+        {
+            // Переименуем  некоторые пункты контекстного меню
+            menuStrip.Items[0].Text = "Копировать";
+            menuStrip.Items[1].Text = "Сохранить как картинку…";
+            menuStrip.Items[2].Text = "Параметры страницы…";
+            menuStrip.Items[3].Text = "Печать…";
+            menuStrip.Items[4].Text = "Показывать значения в точках…";
+            menuStrip.Items[7].Text = "Установить масштаб по умолчанию";
+            // Некоторые пункты удалим
+            menuStrip.Items.RemoveAt(5);
+            menuStrip.Items.RemoveAt(5);
+        }
+        private void zedGraph_CursorChanged(object sender, EventArgs e)
+        {
+            // Разрешим ZedGraph'у изменять курсор при выделении участка на графике, а также при перемещении графика.
+            // В обоих случаях курсор будет "захвачен". Если курсор не "захвачен", то установим курсор обратно в виде стрелки.
+            // Если нужно запретить изменять курсор в любом случае, то достаточно просто убрать условие. 
+            if (!zedGraph.Capture)
+            {
+                zedGraph.Cursor = Cursors.Arrow;
+            }
+        }
+        // включим отображение всплывающей подсказки при наведении курсора на кривую, а также как можно изменять текст этой всплывающей подсказки.
+       string zedGraph_PointValueEvent(ZedGraphControl sender, GraphPane pane, CurveItem curve, int iPt)
+        {
+            // Получим точку, около которой находимся
+            string  res  = "";
+            PointPair point = curve[iPt];
+            for (int i = 0; i < PX.Count; i++)
+            {
+                if (point.X >= i && point.X < i + 1)
+                // Сформируем строку
+                {
+                    res = String.Format("{0}", Form1.listHeader[i+1]);
+                    return res;              
+                }               
+             }
+            return res;
+        }
+
+        private void DrawGraph()
+        {
+            // Получим панель для рисования
+            GraphPane pane = zedGraph.GraphPane;
+            // Сделаем чуть помельче шрифт, чтобы уместилось побольше меток
+            pane.XAxis.Scale.FontSpec.Size = 10;
+            pane.YAxis.Scale.FontSpec.Size = 10;
+
+            // Крупные риски по оси X будут идти с периодом 5
+            pane.XAxis.Scale.MajorStep = 5.0;
+
+            // Мелкие риски будут идти с периодом 1
+            // Таким образом, между крупными рисками будет 5 делений или 4 риски
+            pane.XAxis.Scale.MinorStep = 1.0;
+
+            // Крупные риски по оси Y будут идти с периодом 0.1
+            pane.YAxis.Scale.MajorStep = 0.1;
+
+            // А мелкие риски - с периодом 0.05
+            // Между крупными рисками по оси Y будет два отсчета или одна риска
+            pane.YAxis.Scale.MinorStep = 0.05;
+            // Для оси Y 0 градусов означают, что надписи будут располагаться параллельно оси
+            pane.YAxis.Scale.FontSpec.Angle = 120;
+            pane.XAxis.Title.Text = "XXXX";
+            pane.XAxis.Title.FontSpec.FontColor = Color.Red;
+            pane.YAxis.Title.FontSpec.FontColor = Color.Red;
+            ///Вызов 
+            SetTitels(pane);
+            if (nControl) goto label;// нарисовать управляющий полигон
+
+            if (Form1.indexRowInView2 == 0)           
+            {
+                // Очистим список кривых 
+                pane.CurveList.Clear();
+                for (int k = 0; k <= Form1.nColumns - 2; k++)
+                {
+                    PX.Add(k);
+                    PY.Add(Form1.arayResult[0, k]);
+                }
+                int ii = PX.Count;
+                for (int i = 0; i <= Form1.kSpl - 1; i++)
+                {
+                    Knots.Add(0);
+                }
+                for (int j = Form1.kSpl; j <= ii - 1; j++)
+                {
+                    Knots.Add(j + 1 - Form1.kSpl);
+                }
+                for (int i = ii; i < ii + Form1.kSpl; i++)
+                {
+                    Knots.Add(ii - Form1.kSpl + 1);
+                }
+
+                BSplineCurve(Form1.kSpl, PX, PY, Knots, Form1.Resolution, ref f1_list);
+
+                LineItem f1_curve = pane.AddCurve("Санкт-Петербург", f1_list, Color.Blue, SymbolType.None);
+                f1_curve.Line.IsSmooth = true;
+                //зададим толщину линии
+                f1_curve.Line.Width = 1.0f;
+                zedGraph.AxisChange();
+            // Обновляем график
+                zedGraph.Invalidate();
+                return;
+            }
+            {
+                List<double> PX1 = new List<double> { 0 };
+                PX1.Remove(0);
+                pane.CurveList.Clear();
+                for (int k = 0; k <= Form1.nColumns - 2; k++)
+                {
+                    PX1.Add(k);
+                }
+                int ii = PX1.Count;
+                for (int i = 0; i <= Form1.kSpl - 1; i++)
+                {
+                    Knots.Add(0);
+                }
+                for (int j = Form1.kSpl; j <= ii - 1; j++)
+                {
+                    Knots.Add(j + 1 - Form1.kSpl);
+                }
+                for (int i = ii; i < ii + Form1.kSpl; i++)
+                {
+                    Knots.Add(ii - Form1.kSpl + 1);
+                }
+                for (int m = 0; m <= Form1.indexRowsInView2 - 1; m++)
+                {
+                    PointPairList f3_list = new PointPairList();                
+                    List<double> PY1 = new List<double> { 0 };                
+                    PY1.Remove(0);              
+                    for (int k = 0; k <= Form1.nColumns - 2; k++)
+                    {                    
+                        PY1.Add(Form1.arayResult[m, k]);
+                    }                   
+                    BSplineCurve(Form1.kSpl, PX1, PY1, Knots, Form1.Resolution, ref f3_list);
+                    LineItem f1_curve = pane.AddCurve("", f3_list, colors[m], SymbolType.None);                 
+                    f1_curve.Line.IsSmooth = true;
+                    //зададим толщину линии
+                    f1_curve.Line.Width = 1.0f;
+                    zedGraph.AxisChange();
+                    // Обновляем график
+                    zedGraph.Invalidate();  
+                }
+                int jjj = pane.CurveList.Count;
+                MessageBox.Show("jjj " + jjj.ToString());
+                return;
+            }
+            label:LineItem f2_curve = pane.AddCurve("", f2_list, Color.Red, SymbolType.None);
+            f2_curve.Line.Width = 2.0f;
+            // Вызываем метод AxisChange (), чтобы обновить данные об осях. 
+            // В противном случае на рисунке будет показана только часть графика, 
+            // которая умещается в интервалы по осям, установленные по умолчанию
+            zedGraph.AxisChange();
+            // Обновляем график
+            zedGraph.Invalidate();
+        }
+
+        private static void SetColors(GraphPane pane)
+        {
+            // Установим цвет рамки для всего компонента
+            pane.Border.Color = Color.Red;
+
+            // Установим цвет рамки вокруг графика
+            pane.Chart.Border.Color = Color.Green;
+
+            // Закрасим фон всего компонента ZedGraph. Заливка будет сплошная
+            pane.Fill.Type = FillType.Solid;
+            pane.Fill.Color = Color.Silver;
+
+            // Закрасим область графика (его фон) в черный цвет
+            pane.Chart.Fill.Type = FillType.Solid;
+            pane.Chart.Fill.Color = Color.Black;
+
+            // Включим показ оси на уровне X = 0 и Y = 0, чтобы видеть цвет осей
+            pane.XAxis.MajorGrid.IsZeroLine = true;
+            pane.YAxis.MajorGrid.IsZeroLine = true;
+            // Установим цвет осей
+            pane.XAxis.Color = Color.Gray;
+            pane.YAxis.Color = Color.Gray;
+
+            // Включим сетку
+            pane.XAxis.MajorGrid.IsVisible = true;
+            pane.YAxis.MajorGrid.IsVisible = true;
+            // Установим цвет для сетки
+            pane.XAxis.MajorGrid.Color = Color.Cyan;
+            pane.YAxis.MajorGrid.Color = Color.Cyan;
+
+            // Установим цвет для подписей рядом с осями
+            pane.XAxis.Title.Text = "XXXX";
+
+            pane.XAxis.Title.FontSpec.FontColor = Color.Red;
+            pane.YAxis.Title.FontSpec.FontColor = Color.Red;
+
+            // Установим цвет подписей под метками
+            pane.XAxis.Scale.FontSpec.FontColor = Color.GreenYellow;
+            pane.YAxis.Scale.FontSpec.FontColor = Color.GreenYellow;          
+        }
+        private static void SetTitels(GraphPane pane)
+        {
+            // Установим подписи и цвет для подписей рядом с осями
+            pane.XAxis.Title.Text = "Ось X";
+            pane.YAxis.Title.Text = "Ось Y";
+            pane.XAxis.Title.FontSpec.FontColor = Color.Black;
+            pane.YAxis.Title.FontSpec.FontColor = Color.Black;
+            pane.XAxis.Scale.FontSpec.FontColor = Color.Black;
+            pane.YAxis.Scale.FontSpec.FontColor = Color.Black;
+            // Установим цвет заголовка над графиком
+            pane.Title.Text = "Показатели социально-экономического развития";
+            pane.Title.FontSpec.FontColor = Color.Red;          
+        }
+        private int getInterval(double u, List<int> Knots)
+        // Вычисляем, в каком интервале находится параметр u
+        {
+            for (int i = 0; i < Knots.Count - 1; i++)
+            {
+                if ((u >= Knots[i]) && (u < Knots[i + 1]))
+                {
+                    return i;
+                }
+            }
+            return 0;
+        }
+
+        private static void calcCurrentPoint(double u, int l, int kk, List<double> ControlPointsX, List<double> ControlPointsY, List<int> Knots, out double pntX, out double pntY)
+        {
+            // Вычисляем точку на кривой, соответствующую параметру u по алгоритму Кокса-де Бора
+            // pntX, pntY возвращают значения координат этой точки
+            double[] AX = new double[kk];
+            double[] AY = new double[kk];
+
+            int i, j, r;
+            double d1, d2;
+            for (int jj = 0; jj < kk; jj++)
+            {
+                AX[jj] = ControlPointsX[l - kk + 1 + jj];
+                AY[jj] = ControlPointsY[l - kk + 1 + jj];
+            }
+            for (r = 1; r < kk; r++)
+            {
+
+                for (j = kk - 1; j >= r; j--)
+                {
+                    i = l - kk + 1 + j;
+                    d1 = (u - Knots[i]);
+                    d2 = (Knots[i + kk - r] - u);
+                    AX[j] = (d1 * AX[j] + d2 * AX[j - 1]) / (d1 + d2);
+                    AY[j] = (d1 * AY[j] + d2 * AY[j - 1]) / (d1 + d2);
+                    pntX = 0;
+                    pntY = 0;
+                }//for j
+            }//for r
+            pntX = AX[kk - 1];
+            pntY = AY[kk - 1];
+        }
+        private void BSplineCurve(int k, List<double> ControlX, List<double> ControlY, List<int> Knots, int resolution, ref PointPairList f1_list)
+        // Вычисляем значения координат 
+        {
+            int Resolution = resolution;           
+            List<double> ControlPointsX = new List<double> { 0 };
+            List<double> ControlPointsY = new List<double> { 0 };
+            ControlPointsX.Remove(0);
+            ControlPointsY.Remove(0);
+            for (int i = 0; i < ControlX.Count; i++)
+            {
+                ControlPointsX.Add(ControlX[i]);
+                ControlPointsY.Add(ControlY[i]);
+            }
+            double step = (float)(1.0 / Resolution);
+            double PNTX = 0;
+            double PNTY = 0;
+            double u = 0;
+
+            while (u <= (Knots[ControlPointsX.Count] - step))
+            {
+                u += step;
+                int l = getInterval(u, Knots);
+                calcCurrentPoint(u, l, Form1.kSpl, ControlPointsX, ControlPointsY, Knots, out PNTX, out PNTY);
+                f1_list.Add(PNTX, PNTY);
+            }         
+        }
+
+        private void управляющийПолигонToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            for (int k = 0; k < PX.Count; k++)
+            {
+                f2_list.Add(k, Form1.arayResult[0, k]);
+                nControl = true;
+                DrawGraph();
+            } 
+        }
+    } 
+}         
